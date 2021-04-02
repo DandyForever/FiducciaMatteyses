@@ -6,6 +6,8 @@
 #include <map>
 #include <set>
 #include <ctime>
+#include <cstdlib>
+#include <unistd.h>
 
 using namespace std;
 
@@ -54,15 +56,19 @@ struct Partitions {
     int solution_cost = 0;
     int balance = 0; //0: from left to right
                      //1: from right to left
+    const int tolerance = 1;
+    int cost_check = 0;
 
     Partitions () = delete;
-    Partitions (const Hypergraph& hg) {
+    Partitions (const Hypergraph& hg, bool is_static, int tolerance_percentage):
+        tolerance(hg.vert_num * tolerance_percentage / 100 ? hg.vert_num * tolerance_percentage / 100 : 1)
+    {
         vert_partitions = vector <bool>(hg.vert_num + 1);
         vert_num = hg.vert_num;
-        for (size_t i = 1; i <= vert_num / 2; i++)
-            vert_partitions[i] = false;
-        for (size_t i = vert_num / 2 + 1; i <= vert_num; i++)
-            vert_partitions[i] = true;
+        if (is_static)
+            static_init ();
+        else
+            random_init ();
         logger << "Initial partition done: " << vert_num / 2 << " verteces left and " << vert_num - vert_num / 2 << " vertices right" << std::endl;
         hg_ = &hg;
         calculate_solution_cost();
@@ -71,23 +77,37 @@ struct Partitions {
 
     int getCost () { return solution_cost; }
 
+    bool is_cost_ok () {
+        cost_check = solution_cost;
+        solution_cost = 0;
+        calculate_solution_cost();
+        bool is_ok = cost_check == solution_cost;
+        solution_cost = cost_check;
+        return is_ok;
+    }
+
     void update (size_t vert_id) {
+        if (vert_partitions[vert_id])
+            balance--;
+        else
+            balance++;
         vert_partitions[vert_id] = !vert_partitions[vert_id];
-        balance = balance ? 0 : 1;
     }
 
     void dump () {
-        cout << "Left: ";
+        int count_left = 0;
         for (int i = 1; i <= vert_num; i++) {
             if (!vert_partitions[i])
-                cout << i << " ";
+                count_left++;
         }
-        cout << "\nRight: ";
+        logger << "Left: " << count_left << endl;
+        int count_right = 0;
         for (int i = 1; i <= vert_num; i++) {
             if (vert_partitions[i])
-                cout << i << " ";
+                count_right++;
         }
-        cout << "\nSolution cost: " << solution_cost << endl;
+        logger << "Right: " << count_right << endl;
+        logger << "Solution cost: " << solution_cost << endl;
     }
 
     void dump (string& file_name) {
@@ -109,6 +129,42 @@ private:
                     break;
                 }
             }
+        }
+    }
+
+    void static_init () {
+        for (size_t i = 1; i <= vert_num / 2; i++)
+            vert_partitions[i] = false;
+        for (size_t i = vert_num / 2 + 1; i <= vert_num; i++)
+            vert_partitions[i] = true;
+    }
+
+    void random_init () {
+        srand(time(NULL) % 100);
+        int counter = 0;
+        for (int i = 1; i <= vert_num; i++) {
+            if (rand() % 2) {
+                vert_partitions[i] = true;
+                counter++;
+            } else {
+                vert_partitions[i] = false;
+                counter--;
+            }
+        }
+        int count = 1;
+        while (counter > 1) {
+            if (vert_partitions[count]) {
+                vert_partitions[count] = false;
+                counter -= 2;
+            }
+            count++;
+        }
+        while (counter < 0) {
+            if (!vert_partitions[count]) {
+                vert_partitions[count] = true;
+                counter += 2;
+            }
+            count++;
         }
     }
 };
@@ -155,26 +211,30 @@ struct GainContainer {
     }
 
     bool is_empty (bool balance) const {
-        return left.empty() && right.empty() || balance && right.empty() || !balance && left.empty();
+        return left.empty() || right.empty();
     }
 
-    pair <size_t, int> best_feasible_move (int balance) {
-        if (balance) {
-            auto gain_verts = --right.end();
-            int gain = gain_verts->first;
-            size_t vert = *((gain_verts->second).begin());
-            (gain_verts->second).erase(vert);
-            if ((gain_verts->second).empty())
-                right.erase(gain);
-            return {vert, gain};
+    pair <size_t, int> best_feasible_move (int balance, int tolerance) {
+        auto gain_verts_right = --right.end();
+        auto gain_verts_left = --left.end();
+        int gain_right = gain_verts_right->first;
+        int gain_left = gain_verts_left->first;
+        bool is_right = false;
+        if ((gain_left < gain_right && -balance < tolerance) || balance >= tolerance)
+            is_right = true;
+
+        if (is_right) {
+            size_t vert = *((gain_verts_right->second).begin());
+            (gain_verts_right->second).erase(vert);
+            if ((gain_verts_right->second).empty())
+                right.erase(gain_right);
+            return {vert, gain_right};
         }
-        auto gain_verts = --left.end();
-        int gain = gain_verts->first;
-        size_t vert = *((gain_verts->second).begin());
-        (gain_verts->second).erase(vert);
-        if ((gain_verts->second).empty())
-            left.erase(gain);
-        return {vert, gain};
+        size_t vert = *((gain_verts_left->second).begin());
+        (gain_verts_left->second).erase(vert);
+        if ((gain_verts_left->second).empty())
+            left.erase(gain_left);
+        return {vert, gain_left};
     }
 
     void update (size_t vert_id, bool side, int delta) {
@@ -235,7 +295,7 @@ void applyMove (GainContainer& gc, Partitions& partitionment, const pair <size_t
         for (size_t j = 0; j < partitionment.hg_->edges[edge_id].size(); j++) {
             size_t vert_id = partitionment.hg_->edges[edge_id][j];
 
-            if (partitionment.balance) { //DST is left
+            if (partitionment.vert_partitions[best_move.first]) { //DST is left
                 if (!partitionment.vert_partitions[vert_id]) {
                     is_no_vert_in_dst = false;
 
@@ -293,7 +353,7 @@ int FMpass (GainContainer& gc, Partitions& partitionment) {
     set <size_t> vert_to_change;
 
     while (!gc.is_empty(partitionment.balance)) {
-        auto best_move = gc.best_feasible_move(partitionment.balance);
+        auto best_move = gc.best_feasible_move(partitionment.balance, partitionment.tolerance);
         vert_to_change.insert(best_move.first);
         solution_cost -= best_move.second;
         if (solution_cost < best_cost) {
@@ -312,9 +372,12 @@ void FM (Partitions& partitions) {
     size_t epoch = 0;
     while (is_improved) {
         logger << "Epoch #" << epoch++ << endl;
+        partitions.dump();
         GainContainer gc(partitions);
-        //gc.dump();
-        //std::cout << "Solution cost of initial partition is " << partitions.getCost() << std::endl;
+        if (partitions.is_cost_ok())
+            logger << "Cost is OK" <<endl;
+        else
+            logger << "Cost is not OK" << endl;
         int best = FMpass(gc, partitions);
         if (best == partitions.solution_cost)
             is_improved = false;
@@ -326,16 +389,24 @@ void FM (Partitions& partitions) {
 
 //"..\\benchmarks\\ISPD98_ibm18.hgr"
 //"..\\simple.hgr"
-int main()
+int main(int argc, char* argv[])
 {
+    if (argc < 2) {
+        cout << "File name not found" << endl;
+        return -1;
+    }
+    int tolerance_percentage = 0;
+    if (argc == 3) {
+        tolerance_percentage = atoi (argv[2]);
+    }
     size_t start_t = clock();
-    string in_file_name = "..\\benchmarks\\ISPD98_ibm01.hgr";
+    string in_file_name = string(argv[1]);
     string out_file_name = in_file_name + ".part.2";
     string log_file_name = in_file_name + ".log";
     logger.open(log_file_name);
-    logger << "Algorithm Fiduccia Matteyses" << endl;
+    logger << "Algorithm Feduccie Mattheyses" << endl;
     Hypergraph hg(in_file_name);
-    Partitions partitions(hg);
+    Partitions partitions(hg, false, tolerance_percentage);
     FM(partitions);
     size_t end_t = clock();
     size_t exec_t = (end_t - start_t) / 1000;
