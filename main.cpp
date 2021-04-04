@@ -177,6 +177,49 @@ struct GainContainer {
 
     GainContainer () = delete;
     GainContainer (const Partitions& partitions) {
+//        GainContainer gc_cosim(partitions, 0);
+        vert_gain = vector <int> (partitions.vert_num + 1, 0);
+        for (size_t e = 1; e <= partitions.hg_->edge_num; e++) {
+            int vert_left = 0, vert_right = 0, vertex_id_left = 0, vertex_id_right = 0;
+
+            for (size_t i = 0; i < partitions.hg_->edges[e].size(); i++) {
+                int vert_id = partitions.hg_->edges[e][i];
+
+                if (!partitions.vert_partitions[vert_id]) {
+                    vert_left++;
+                    vertex_id_left = vert_id;
+                } else {
+                    vert_right++;
+                    vertex_id_right = vert_id;
+                }
+            }
+
+            if ((vert_right == 0 && vert_left != 1) || (vert_left == 0 && vert_right != 1)) {
+                for (size_t i = 0; i < partitions.hg_->edges[e].size(); i++) {
+                    int vert_id = partitions.hg_->edges[e][i];
+
+                    vert_gain[vert_id]--;
+                }
+            }
+            if (vert_left == 1 && vert_right != 0)
+                vert_gain[vertex_id_left]++;
+            if (vert_right == 1 && vert_left != 0)
+                vert_gain[vertex_id_right]++;
+        }
+        for (size_t v = 1; v <= partitions.vert_num; v++) {
+            if (!partitions.vert_partitions[v])
+                left[vert_gain[v]].insert(v);
+            else
+                right[vert_gain[v]].insert(v);
+        }
+//        for (size_t i = 1; i <= partitions.vert_num; i++) {
+//            if (vert_gain[i] != gc_cosim.vert_gain[i]) {
+//                cout << "DEBUG: Different gain for " << i << " calculated " << vert_gain[i] << " real " << gc_cosim.vert_gain[i] << endl;
+//            }
+//        }
+        logger << "Gain container initialized" << std::endl;
+    }
+    GainContainer (const Partitions& partitions, bool flag) {
         vert_gain = vector <int> (partitions.vert_num + 1);
         for (size_t i = 1; i <= partitions.vert_num; i++) {
             int gain_current = 0;
@@ -367,52 +410,101 @@ int FMpass (GainContainer& gc, Partitions& partitionment) {
     return best_cost;
 }
 
-void FM (Partitions& partitions) {
+size_t FM (Partitions& partitions) {
     bool is_improved = true;
     size_t epoch = 0;
     while (is_improved) {
         logger << "Epoch #" << epoch++ << endl;
         partitions.dump();
+        size_t gc_init_start_t = clock();
         GainContainer gc(partitions);
+        size_t gc_init_end_t = clock();
         if (partitions.is_cost_ok())
             logger << "Cost is OK" <<endl;
         else
             logger << "Cost is not OK" << endl;
+        size_t cost_check_end_t = clock();
         int best = FMpass(gc, partitions);
         if (best == partitions.solution_cost)
             is_improved = false;
         else
             partitions.solution_cost = best;
-        logger << "Current solution cost is " << best << " balance " << partitions.balance << endl << endl;
+        size_t pass_end_t = clock();
+        logger << "Current solution cost is " << best << " balance " << partitions.balance << endl;
+        size_t gc_init = (gc_init_end_t - gc_init_start_t) / 1000;
+        size_t check = (cost_check_end_t - gc_init_end_t) / 1000;
+        size_t pass = (pass_end_t - cost_check_end_t) / 1000;
+        size_t epoch_t = (pass_end_t - gc_init_start_t) / 1000;
+        logger << "GC init: " << gc_init << " s\nCost check: " << check << " s\nFM pass: " << pass << " s\nTotal: " << epoch_t << endl << endl;
     }
+    return epoch;
 }
 
-//"..\\benchmarks\\ISPD98_ibm18.hgr"
-//"..\\simple.hgr"
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
-        cout << "File name not found" << endl;
+        cout << "File not found" << endl;
         return -1;
     }
     int tolerance_percentage = 0;
     if (argc == 3) {
         tolerance_percentage = atoi (argv[2]);
     }
-    size_t start_t = clock();
-    string in_file_name = string(argv[1]);
-    string out_file_name = in_file_name + ".part.2";
-    string log_file_name = in_file_name + ".log";
-    logger.open(log_file_name);
-    logger << "Algorithm Feduccie Mattheyses" << endl;
-    Hypergraph hg(in_file_name);
-    Partitions partitions(hg, false, tolerance_percentage);
-    FM(partitions);
-    size_t end_t = clock();
-    size_t exec_t = (end_t - start_t) / 1000;
-    partitions.dump(out_file_name);
-    logger << "Total execution time is " << exec_t / 60 << " minutes " << exec_t % 60 << " seconds" << endl;
-    logger.close();
+    string tests[18] = {
+            "..\\benchmarks\\ISPD98_ibm01.hgr",
+            "..\\benchmarks\\ISPD98_ibm02.hgr",
+            "..\\benchmarks\\ISPD98_ibm03.hgr",
+            "..\\benchmarks\\ISPD98_ibm04.hgr",
+            "..\\benchmarks\\ISPD98_ibm05.hgr",
+            "..\\benchmarks\\ISPD98_ibm06.hgr",
+            "..\\benchmarks\\ISPD98_ibm07.hgr",
+            "..\\benchmarks\\ISPD98_ibm08.hgr",
+            "..\\benchmarks\\ISPD98_ibm09.hgr",
+            "..\\benchmarks\\ISPD98_ibm10.hgr",
+            "..\\benchmarks\\ISPD98_ibm11.hgr",
+            "..\\benchmarks\\ISPD98_ibm12.hgr",
+            "..\\benchmarks\\ISPD98_ibm13.hgr",
+            "..\\benchmarks\\ISPD98_ibm14.hgr",
+            "..\\benchmarks\\ISPD98_ibm15.hgr",
+            "..\\benchmarks\\ISPD98_ibm16.hgr",
+            "..\\benchmarks\\ISPD98_ibm17.hgr",
+            "..\\benchmarks\\ISPD98_ibm18.hgr"
+    };
+    string extra_tests[10] = {
+            "..\\benchmarks\\dac2012_superblue2.hgr",
+            "..\\benchmarks\\dac2012_superblue3.hgr",
+            "..\\benchmarks\\dac2012_superblue6.hgr",
+            "..\\benchmarks\\dac2012_superblue7.hgr",
+            "..\\benchmarks\\dac2012_superblue9.hgr",
+            "..\\benchmarks\\dac2012_superblue11.hgr",
+            "..\\benchmarks\\dac2012_superblue12.hgr",//10903650
+            "..\\benchmarks\\dac2012_superblue14.hgr",
+            "..\\benchmarks\\dac2012_superblue16.hgr",
+            "..\\benchmarks\\dac2012_superblue19.hgr",
+    };
+    for (int i = 0 ; i < 10; i++) {
+        size_t start_t = clock();
+        string in_file_name = extra_tests[i];//string(argv[1]);
+        string out_file_name = in_file_name + ".part.2";
+        string log_file_name = in_file_name + ".log";
+        logger.open(log_file_name);
+        logger << "Algorithm Feduccie Mattheyses" << endl;
+        Hypergraph hg(in_file_name);
+        Partitions partitions(hg, true, tolerance_percentage);
+        size_t epoch = FM(partitions);
+        size_t end_t = clock();
+        size_t exec_t = (end_t - start_t) / 1000;
+        partitions.dump(out_file_name);
+        logger << "Total execution time is " << exec_t / 60 << " minutes " << exec_t % 60 << " seconds" << endl;
+        logger.close();
+        cout << "Test name: " << extra_tests[i] <<
+                " Num of vertecies " << hg.vert_num <<
+                " Num of edges " << hg.edge_num <<
+                " balance " << partitions.balance <<
+                " cut " << partitions.solution_cost <<
+                " time " << exec_t <<
+                " #iters " << epoch << endl;
+    }
     return 0;
 }
 
