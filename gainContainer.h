@@ -4,16 +4,19 @@
 #include <set>
 #include <map>
 #include <vector>
+#include <list>
 #include <iostream>
 #include "partitions.h"
 
 using namespace std;
 
 struct GainContainer {
-    map <int, set <int>> left;
-    map <int, set <int>> right;
+    map <int, list <int>> left;
+    map <int, list <int>> right;
     vector <int> vert_gain;
-    set <size_t> is_deleted;
+    vector <int> deltas;
+    vector <std::list<int>::iterator> iterators;
+    vector <bool> is_deleted;
 
     GainContainer () = delete;
     GainContainer (const Partitions& partitions);

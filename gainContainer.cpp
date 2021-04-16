@@ -2,6 +2,9 @@
 
 GainContainer::GainContainer (const Partitions& partitions) {
     vert_gain = vector <int> (partitions.vert_num + 1, 0);
+    is_deleted = vector <bool> (partitions.vert_num + 1, false);
+    deltas = vector<int> (partitions.vert_num + 1, 0);
+    iterators = vector <list<int>::iterator> (partitions.vert_num + 1);
     for (size_t e = 1; e <= partitions.hg_->edge_num; e++) {
         int vert_left = 0, vert_right = 0, vertex_id_left = 0, vertex_id_right = 0;
 
@@ -30,10 +33,15 @@ GainContainer::GainContainer (const Partitions& partitions) {
             vert_gain[vertex_id_right]++;
     }
     for (size_t v = 1; v <= partitions.vert_num; v++) {
-        if (!partitions.vert_partitions[v])
-            left[vert_gain[v]].insert(v);
-        else
-            right[vert_gain[v]].insert(v);
+        if (!partitions.vert_partitions[v]) {
+            auto& left_item = left[vert_gain[v]];
+            left_item.push_front(v);
+            iterators[v] = left_item.begin();
+        } else {
+            auto& right_item = right[vert_gain[v]];
+            right_item.push_front(v);
+            iterators[v] = right_item.begin();
+        }
     }
     partitions.hg_->logger << "Gain container initialized" << endl;
 }
@@ -63,10 +71,16 @@ GainContainer::GainContainer (const Partitions& partitions, bool flag) {
             if (is_entirely_in_partition)
                 gain_current--;
         }
-        if (!partition_current)
-            left[gain_current].insert(i);
-        else
-            right[gain_current].insert(i);
+        if (!partition_current) {
+            auto& left_item = left[gain_current];
+            left_item.push_front(i);
+            iterators[i] = left_item.begin();
+        }
+        else {
+            auto& right_item = right[gain_current];
+            right_item.push_front(i);
+            iterators[i] = right_item.begin();
+        }
         vert_gain[i] = gain_current;
     }
     partitions.hg_->logger << "Gain container initialized" << endl;
@@ -82,37 +96,46 @@ pair <size_t, int> GainContainer::best_feasible_move (int balance, int tolerance
         is_right = true;
 
     if (is_right) {
-        size_t vert = *((gain_verts_right->second).begin());
-        (gain_verts_right->second).erase(vert);
+        size_t vert = (gain_verts_right->second).front();
+        (gain_verts_right->second).pop_front();
+        is_deleted[vert] = true;
         if ((gain_verts_right->second).empty())
             right.erase(gain_right);
         return {vert, gain_right};
     }
-    size_t vert = *((gain_verts_left->second).begin());
-    (gain_verts_left->second).erase(vert);
+    size_t vert = (gain_verts_left->second).front();
+    (gain_verts_left->second).pop_front();
+    is_deleted[vert] = true;
     if ((gain_verts_left->second).empty())
         left.erase(gain_left);
     return {vert, gain_left};
 }
 
 void GainContainer::update (size_t vert_id, bool side, int delta) {
-    if (is_deleted.count(vert_id))
+    if (is_deleted[vert_id])
         return;
     erase(vert_id, side);
     vert_gain[vert_id] += delta;
-    if (side)
-        right[vert_gain[vert_id]].insert(vert_id);
-    else
-        left[vert_gain[vert_id]].insert(vert_id);
+    if (side) {
+        auto& right_item = right[vert_gain[vert_id]];
+        right_item.push_front(vert_id);
+        iterators[vert_id] = right_item.begin();
+    } else {
+        auto& left_item = left[vert_gain[vert_id]];
+        left_item.push_front(vert_id);
+        iterators[vert_id] = left_item.begin();
+    }
 }
 
 void GainContainer::erase (size_t vert_id, bool side) {
+    if (is_deleted[vert_id])
+        return;
     if (side) {
-        right[vert_gain[vert_id]].erase(vert_id);
+        right[vert_gain[vert_id]].erase(iterators[vert_id]);
         if (right[vert_gain[vert_id]].empty())
             right.erase(vert_gain[vert_id]);
     } else {
-        left[vert_gain[vert_id]].erase(vert_id);
+        left[vert_gain[vert_id]].erase(iterators[vert_id]);
         if (left[vert_gain[vert_id]].empty())
             left.erase(vert_gain[vert_id]);
     }

@@ -45,7 +45,7 @@ void applyMove (GainContainer& gc, Partitions& partitionment, const pair <size_t
             for (size_t j = 0; j < partitionment.hg_->edges[edge_id].size(); j++) {
                 size_t vert_id = partitionment.hg_->edges[edge_id][j];
 
-                gc.update(vert_id, partitionment.vert_partitions[vert_id], 1);
+                gc.deltas[vert_id]++;
             }
         }
 
@@ -53,28 +53,38 @@ void applyMove (GainContainer& gc, Partitions& partitionment, const pair <size_t
             for (size_t j = 0; j < partitionment.hg_->edges[edge_id].size(); j++) {
                 size_t vert_id = partitionment.hg_->edges[edge_id][j];
 
-                gc.update(vert_id, partitionment.vert_partitions[vert_id], -1);
+                gc.deltas[vert_id]--;
             }
         }
 
         if (count_in_src == 1)
-            gc.update(vert_id_src, partitionment.vert_partitions[vert_id_src], 1);
+            gc.deltas[vert_id_src]++;
         if (count_in_dst == 1)
-            gc.update(vert_id_dst, partitionment.vert_partitions[vert_id_dst], -1);
+            gc.deltas[vert_id_dst]--;
     }
     gc.erase(best_move.first, partitionment.vert_partitions[best_move.first]);
-    gc.is_deleted.insert(best_move.first);
-    partitionment.update(best_move.first);
+    gc.is_deleted[best_move.first] = true;
+    for (size_t i = 0; i < partitionment.hg_->verts[best_move.first].size(); i++) {
+        size_t edge_id = partitionment.hg_->verts[best_move.first][i];
+        for (size_t j = 0; j < partitionment.hg_->edges[edge_id].size(); j++) {
+            size_t vert_id = partitionment.hg_->edges[edge_id][j];
+            if (gc.deltas[vert_id]) {
+                gc.update(vert_id, partitionment.vert_partitions[vert_id], gc.deltas[vert_id]);
+                gc.deltas[vert_id] = 0;
+            }
+        }
+    }
+        partitionment.update(best_move.first);
 }
 
 int FMpass (GainContainer& gc, Partitions& partitionment) {
     int solution_cost = partitionment.getCost();
     int best_cost = solution_cost;
-    set <size_t> vert_to_change;
+    list <size_t> vert_to_change;
 
     while (!gc.is_empty(partitionment.balance)) {
         auto best_move = gc.best_feasible_move(partitionment.balance, partitionment.tolerance);
-        vert_to_change.insert(best_move.first);
+        vert_to_change.push_back(best_move.first);
         solution_cost -= best_move.second;
         if (solution_cost < best_cost) {
             best_cost = solution_cost;
